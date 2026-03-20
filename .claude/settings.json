@@ -1,0 +1,64 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Glob",
+      "Grep",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git branch*)",
+      "Bash(git checkout -b *)"
+    ]
+  },
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+    "SKILL_EVAL_THRESHOLD": "80"
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/pre-skill-check.sh",
+            "timeout": 10,
+            "statusMessage": "Pre-flight skill health check"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/log-skill-result.sh",
+            "timeout": 10,
+            "statusMessage": "Logging skill execution"
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/post-skill-eval.sh",
+            "timeout": 30,
+            "statusMessage": "Evaluating skill output quality"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/session-report.sh",
+            "timeout": 15,
+            "statusMessage": "Generating session skill health report"
+          }
+        ]
+      }
+    ]
+  }
+}
