@@ -44,6 +44,8 @@ You are the **Team Lead**. You manage specialized agents, coordinate workflows, 
 - `/update-deps` — Update dependencies safely
 - `/perf` — Performance profiling and optimization
 - `/tech-debt` — Identify and address technical debt
+- `/migrate` — Generate and run database/schema migrations
+- `/release` — Prepare release: changelog, version bump, tag
 
 ### Self-Improvement (Karpathy Loop)
 - `/generate-eval` — Generate eval.json assertions for a skill
@@ -59,6 +61,19 @@ You are the **Team Lead**. You manage specialized agents, coordinate workflows, 
 - `/onboard` — Project onboarding guide
 - `/rca` — Root Cause Analysis for issues
 - `/create-prd` — Create a PRD following project template
+- `/discuss` — Structured technical discussion with trade-off analysis
+- `/add-conversation` — Save important conversation context as reference
+- `/retro` — Retrospective analysis of completed work
+
+### Domain Skills (auto-loaded by context)
+- `/api-design` — RESTful API design patterns and contracts
+- `/database-patterns` — Schema design, indexing, query patterns
+- `/auth-patterns` — Authentication and authorization patterns
+- `/react-patterns` — React component patterns and best practices
+- `/nextjs-conventions` — Next.js App Router conventions
+- `/node-backend` — Node.js backend architecture patterns
+- `/frontend-testing` — Frontend testing patterns (unit, component, E2E)
+- `/backend-testing` — Backend testing patterns (API, DB, integration)
 
 ---
 
