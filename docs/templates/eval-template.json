@@ -1,0 +1,26 @@
+{
+  "skill": "SKILL_NAME",
+  "version": 1,
+  "test_cases": [
+    {
+      "name": "basic usage",
+      "input": "sample input",
+      "assertions": [
+        { "type": "contains", "value": "expected keyword" },
+        { "type": "not_contains", "value": "forbidden content" },
+        { "type": "min_words", "value": 50 },
+        { "type": "has_heading", "value": "##" },
+        { "type": "has_bullet_list", "value": true }
+      ]
+    },
+    {
+      "name": "edge case",
+      "input": "minimal input",
+      "assertions": [
+        { "type": "min_words", "value": 20 },
+        { "type": "not_contains", "value": "TODO" },
+        { "type": "not_contains", "value": "TBD" }
+      ]
+    }
+  ]
+}
