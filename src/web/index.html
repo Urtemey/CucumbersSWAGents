@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CucumbersSWAGents</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/tokyo-night-dark.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --dim: #7d8590;
+    --cyan: #79c0ff;
+    --green: #3fb950;
+    --yellow: #d29922;
+    --red: #f85149;
+    --purple: #bc8cff;
+    --blue: #58a6ff;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'JetBrains Mono', 'Fira Code', monospace; min-height: 100vh; }
+
+  /* ── Scrollbars ── */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  /* ── Header ── */
+  header {
+    border-bottom: 1px solid var(--border);
+    padding: 12px 24px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    background: var(--surface);
+    position: sticky; top: 0; z-index: 100;
+  }
+  .logo { font-size: 1.2rem; font-weight: 700; color: var(--cyan); letter-spacing: -0.5px; }
+  .logo span { color: var(--green); }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); flex-shrink: 0; }
+  .status-dot.running { background: var(--yellow); animation: pulse-dot 1s infinite; }
+  .status-dot.done    { background: var(--green); }
+  .status-dot.error   { background: var(--red); }
+  @keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:.3} }
+  .status-label { font-size: .75rem; color: var(--dim); }
+  .timer { font-size: .75rem; color: var(--dim); margin-left: auto; font-variant-numeric: tabular-nums; }
+
+  /* ── Layout ── */
+  .layout {
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    grid-template-rows: auto 1fr;
+    gap: 0;
+    height: calc(100vh - 53px);
+  }
+  .sidebar {
+    grid-row: 1 / 3;
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .main-top {
+    border-bottom: 1px solid var(--border);
+    overflow: hidden;
+  }
+  .main-bottom { overflow: hidden; display: flex; flex-direction: column; }
+
+  /* ── Sidebar: form ── */
+  .form-section {
+    padding: 20px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .form-section label { display: block; font-size: .7rem; color: var(--dim); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 6px; }
+  .form-section input,
+  .form-section textarea {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-family: inherit;
+    font-size: .82rem;
+    outline: none;
+    transition: border-color .15s;
+  }
+  .form-section input:focus,
+  .form-section textarea:focus { border-color: var(--cyan); }
+  .form-section textarea { resize: vertical; min-height: 120px; }
+  .form-row { display: flex; gap: 10px; align-items: flex-end; margin-top: 10px; }
+  .checkbox-row { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+  .checkbox-row label { font-size: .8rem; color: var(--dim); text-transform: none; letter-spacing: 0; margin: 0; }
+  .checkbox-row input[type=checkbox] { accent-color: var(--cyan); width: 14px; height: 14px; }
+  .run-btn {
+    flex: 1;
+    background: var(--cyan);
+    color: var(--bg);
+    border: none;
+    border-radius: 6px;
+    padding: 9px 14px;
+    font-family: inherit;
+    font-size: .82rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: opacity .15s, transform .1s;
+    letter-spacing: .03em;
+  }
+  .run-btn:hover  { opacity: .85; }
+  .run-btn:active { transform: scale(.97); }
+  .run-btn:disabled { opacity: .4; cursor: not-allowed; }
+  .stop-btn {
+    background: transparent;
+    border: 1px solid var(--red);
+    color: var(--red);
+    border-radius: 6px;
+    padding: 9px 10px;
+    font-family: inherit;
+    font-size: .82rem;
+    cursor: pointer;
+    transition: background .15s;
+  }
+  .stop-btn:hover { background: rgba(248,81,73,.1); }
+
+  /* ── Graph panel ── */
+  .graph-panel {
+    padding: 20px;
+    flex: 1;
+    overflow-y: auto;
+  }
+  .graph-title { font-size: .7rem; color: var(--dim); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 16px; }
+  .graph-svg-wrap { display: flex; justify-content: center; }
+  svg.agent-graph { overflow: visible; }
+
+  .node-box { transition: all .3s ease; }
+  .node-box rect { transition: fill .3s, stroke .3s; }
+  .node-box text { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 600; fill: #e6edf3; }
+  .node-box .sub-text { font-size: 9px; font-weight: 400; fill: #7d8590; }
+
+  .node-idle    rect { fill: #161b22; stroke: #30363d; stroke-width: 1.5; }
+  .node-active  rect { fill: #1c2128; stroke: #d29922; stroke-width: 2; filter: drop-shadow(0 0 6px rgba(210,153,34,.5)); }
+  .node-done    rect { fill: #12261e; stroke: #3fb950; stroke-width: 1.5; }
+  .node-error   rect { fill: #2a1518; stroke: #f85149; stroke-width: 1.5; }
+  .node-skipped rect { fill: #0d1117; stroke: #21262d; stroke-width: 1; }
+  .node-skipped text { fill: #484f58; }
+
+  .pulse-ring {
+    animation: pulse-ring 1.2s ease-out infinite;
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+  @keyframes pulse-ring { 0%{opacity:.7;transform:scale(1)} 100%{opacity:0;transform:scale(1.5)} }
+
+  .flow-arrow { stroke: var(--border); stroke-width: 1.5; fill: none; marker-end: url(#arrow); }
+  .flow-arrow.active { stroke: var(--yellow); animation: flow-dash 1s linear infinite; }
+  .flow-arrow.done   { stroke: var(--green); }
+  @keyframes flow-dash { to { stroke-dashoffset: -20; } }
+
+  /* ── Event log ── */
+  .log-panel { flex: 1; overflow-y: auto; padding: 0 4px 8px; }
+  .log-section { padding: 12px 16px 0; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .log-section .title { font-size: .7rem; color: var(--dim); text-transform: uppercase; letter-spacing: .08em; padding-bottom: 10px; }
+  .log-entry {
+    display: flex; gap: 10px; align-items: baseline;
+    padding: 3px 16px;
+    font-size: .75rem;
+    border-left: 2px solid transparent;
+    transition: background .1s;
+  }
+  .log-entry:hover { background: rgba(255,255,255,.02); }
+  .log-time { color: var(--dim); flex-shrink: 0; font-variant-numeric: tabular-nums; }
+  .log-node { flex-shrink: 0; width: 70px; }
+  .log-msg  { color: var(--text); word-break: break-word; }
+
+  .log-entry.node_start  { border-left-color: var(--yellow); }
+  .log-entry.node_done   { border-left-color: var(--green);  }
+  .log-entry.node_error  { border-left-color: var(--red);    }
+  .log-entry.result      { border-left-color: var(--cyan);   }
+  .log-entry.sub_step .log-msg { color: var(--dim); }
+
+  /* ── Code panel ── */
+  .code-header {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    flex-shrink: 0;
+    background: var(--surface);
+  }
+  .code-header .title { font-size: .7rem; color: var(--dim); text-transform: uppercase; letter-spacing: .08em; }
+  .copy-btn {
+    background: transparent; border: 1px solid var(--border);
+    color: var(--dim); border-radius: 5px; padding: 3px 10px;
+    font-size: .7rem; font-family: inherit; cursor: pointer; transition: all .15s;
+  }
+  .copy-btn:hover { border-color: var(--cyan); color: var(--cyan); }
+  .code-body { flex: 1; overflow: auto; }
+  .code-body pre { margin: 0; border-radius: 0; }
+  .code-body pre code { background: transparent !important; padding: 14px 16px !important; font-size: .78rem !important; }
+  .code-placeholder {
+    height: 100%; display: flex; align-items: center; justify-content: center;
+    color: var(--dim); font-size: .8rem; flex-direction: column; gap: 8px;
+  }
+  .code-placeholder .icon { font-size: 2rem; opacity: .3; }
+  .result-banner {
+    padding: 12px 16px; background: rgba(63,185,80,.08);
+    border-bottom: 1px solid var(--green);
+    font-size: .8rem; color: var(--green);
+  }
+
+  /* ── Spinner in svg ── */
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .node-spinner { animation: spin .8s linear infinite; transform-box: fill-box; transform-origin: center; }
+
+  /* ── Toasts ── */
+  #toast {
+    position: fixed; bottom: 20px; right: 20px;
+    background: var(--surface); border: 1px solid var(--border);
+    color: var(--text); padding: 10px 16px; border-radius: 8px;
+    font-size: .8rem; opacity: 0; transform: translateY(10px);
+    transition: opacity .2s, transform .2s; pointer-events: none; z-index: 999;
+  }
+  #toast.show { opacity: 1; transform: translateY(0); }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header>
+  <div class="logo">🥒 Cucumbers<span>SWAGents</span></div>
+  <div class="status-dot" id="statusDot"></div>
+  <div class="status-label" id="statusLabel">готов</div>
+  <div class="timer" id="timer"></div>
+</header>
+
+<!-- Layout -->
+<div class="layout">
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="form-section">
+      <div style="margin-bottom:12px">
+        <label>ID задачи</label>
+        <input id="taskId" type="text" value="task-001" placeholder="task-001">
+      </div>
+      <div>
+        <label>Текст задачи</label>
+        <textarea id="taskText" placeholder="Опиши задачу... например: напиши функцию, которая возвращает сумму двух чисел"></textarea>
+      </div>
+      <div class="checkbox-row">
+        <input type="checkbox" id="dryRun">
+        <label for="dryRun">Dry run (не сдавать в Gitea)</label>
+      </div>
+      <div class="form-row" style="margin-top:14px">
+        <button class="run-btn" id="runBtn" onclick="startRun()">▶ Запустить</button>
+        <button class="stop-btn" id="stopBtn" onclick="stopRun()" style="display:none">■</button>
+      </div>
+    </div>
+
+    <div class="graph-panel">
+      <div class="graph-title">граф агентов</div>
+      <div class="graph-svg-wrap">
+        <svg class="agent-graph" width="260" height="340" viewBox="0 0 260 340">
+          <defs>
+            <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L8,3 z" fill="#30363d"/>
+            </marker>
+            <marker id="arrow-active" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L8,3 z" fill="#d29922"/>
+            </marker>
+            <marker id="arrow-done" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+              <path d="M0,0 L0,6 L8,3 z" fill="#3fb950"/>
+            </marker>
+          </defs>
+
+          <!-- START -->
+          <text x="130" y="20" text-anchor="middle" fill="#484f58" font-size="11" font-family="monospace">START</text>
+          <!-- Arrow: START → SUPERVISOR -->
+          <line x1="130" y1="26" x2="130" y2="54" class="flow-arrow" id="arrow-start-sv"/>
+
+          <!-- SUPERVISOR -->
+          <g class="node-box node-idle" id="node-supervisor">
+            <rect x="65" y="58" width="130" height="38" rx="6"/>
+            <text x="130" y="80" text-anchor="middle">SUPERVISOR</text>
+            <text x="130" y="92" text-anchor="middle" class="sub-text" id="sub-supervisor">routing</text>
+            <!-- pulse ring (shown when active) -->
+            <rect class="pulse-ring" id="pulse-supervisor" x="65" y="58" width="130" height="38" rx="6" fill="none" stroke="#d29922" stroke-width="2" opacity="0"/>
+          </g>
+
+          <!-- Arrow: SV → branches -->
+          <path d="M 80,96 L 80,116 L 40,116 L 40,146" class="flow-arrow" id="arrow-sv-fetch"/>
+          <line x1="130" y1="96" x2="130" y2="146" class="flow-arrow" id="arrow-sv-coder"/>
+          <path d="M 180,96 L 180,116 L 220,116 L 220,146" class="flow-arrow" id="arrow-sv-sub"/>
+
+          <!-- TASK_FETCHER -->
+          <g class="node-box node-idle" id="node-task_fetcher">
+            <rect x="4" y="150" width="76" height="38" rx="6"/>
+            <text x="42" y="170" text-anchor="middle" font-size="9.5">FETCHER</text>
+            <text x="42" y="182" text-anchor="middle" class="sub-text" id="sub-task_fetcher">idle</text>
+            <rect class="pulse-ring" id="pulse-task_fetcher" x="4" y="150" width="76" height="38" rx="6" fill="none" stroke="#d29922" stroke-width="2" opacity="0"/>
+          </g>
+
+          <!-- CODER -->
+          <g class="node-box node-idle" id="node-coder">
+            <rect x="90" y="150" width="80" height="38" rx="6"/>
+            <text x="130" y="170" text-anchor="middle">CODER</text>
+            <text x="130" y="182" text-anchor="middle" class="sub-text" id="sub-coder">idle</text>
+            <rect class="pulse-ring" id="pulse-coder" x="90" y="150" width="80" height="38" rx="6" fill="none" stroke="#d29922" stroke-width="2" opacity="0"/>
+          </g>
+
+          <!-- SUBMITTER -->
+          <g class="node-box node-idle" id="node-submitter">
+            <rect x="182" y="150" width="74" height="38" rx="6"/>
+            <text x="219" y="170" text-anchor="middle" font-size="9.5">SUBMIT</text>
+            <text x="219" y="182" text-anchor="middle" class="sub-text" id="sub-submitter">idle</text>
+            <rect class="pulse-ring" id="pulse-submitter" x="182" y="150" width="74" height="38" rx="6" fill="none" stroke="#d29922" stroke-width="2" opacity="0"/>
+          </g>
+
+          <!-- Arrows back to SV -->
+          <path d="M 42,188 L 42,230 L 130,230 L 130,240" class="flow-arrow" id="arrow-fetch-sv" style="stroke-dasharray:4"/>
+          <line x1="130" y1="188" x2="130" y2="240" class="flow-arrow" id="arrow-coder-sv" style="stroke-dasharray:4"/>
+          <path d="M 219,188 L 219,230 L 130,230 L 130,240" class="flow-arrow" id="arrow-sub-sv" style="stroke-dasharray:4"/>
+
+          <!-- Arrow to END -->
+          <line x1="130" y1="240" x2="130" y2="270" class="flow-arrow" id="arrow-sv-end"/>
+          <text x="130" y="288" text-anchor="middle" fill="#484f58" font-size="11" font-family="monospace">END</text>
+        </svg>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Right top: event log -->
+  <div class="main-top" style="height:45%; display:flex; flex-direction:column; overflow:hidden;">
+    <div class="log-section">
+      <div class="title">события</div>
+    </div>
+    <div class="log-panel" id="logPanel"></div>
+  </div>
+
+  <!-- Right bottom: code -->
+  <div class="main-bottom">
+    <div class="code-header">
+      <div class="title" id="codeTitle">код</div>
+      <button class="copy-btn" onclick="copyCode()">копировать</button>
+    </div>
+    <div id="resultBanner" style="display:none" class="result-banner"></div>
+    <div class="code-body" id="codeBody">
+      <div class="code-placeholder">
+        <div class="icon">⌥</div>
+        <div>код появится здесь после генерации</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ─── State ──────────────────────────────────────────────────────────────────
+let _evtSource = null;
+let _timerInterval = null;
+let _startTime = null;
+let _currentCode = '';
+const _nodeStates = { supervisor: 'idle', task_fetcher: 'idle', coder: 'idle', submitter: 'idle' };
+const _nodeColors = { supervisor: '#79c0ff', task_fetcher: '#bc8cff', coder: '#d29922', submitter: '#58a6ff' };
+
+// ─── Node state helpers ──────────────────────────────────────────────────────
+function setNodeState(node, state, subMsg) {
+  _nodeStates[node] = state;
+  const el = document.getElementById('node-' + node);
+  const pulse = document.getElementById('pulse-' + node);
+  const sub = document.getElementById('sub-' + node);
+  if (!el) return;
+
+  el.className = 'node-box node-' + state;
+  if (pulse) pulse.style.opacity = state === 'active' ? '1' : '0';
+  if (sub && subMsg !== undefined) sub.textContent = subMsg.slice(0, 16);
+}
+
+function setArrowState(id, state) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.className = 'flow-arrow' + (state === 'active' ? ' active' : state === 'done' ? ' done' : '');
+  if (state === 'active') el.style.strokeDasharray = '6,4';
+  else el.style.strokeDasharray = '';
+}
+
+// ─── Event handlers ──────────────────────────────────────────────────────────
+const NODE_ARROWS = {
+  supervisor:   'arrow-start-sv',
+  task_fetcher: 'arrow-sv-fetch',
+  coder:        'arrow-sv-coder',
+  submitter:    'arrow-sv-sub',
+};
+
+function handleEvent(ev) {
+  const { type, node, nodes, message, data } = ev;
+
+  if (type === 'node_start') {
+    setNodeState(node, 'active', 'работает...');
+    if (NODE_ARROWS[node]) setArrowState(NODE_ARROWS[node], 'active');
+    addLog(node, 'запущен', 'node_start');
+    updateStatus('running', node);
+  }
+
+  else if (type === 'node_done') {
+    setNodeState(node, 'done', 'готово');
+    if (NODE_ARROWS[node]) setArrowState(NODE_ARROWS[node], 'done');
+    addLog(node, 'завершён ✓', 'node_done');
+    if (node !== 'supervisor') updateStatus('running', '');
+  }
+
+  else if (type === 'node_skip') {
+    (nodes || []).forEach(n => {
+      if (_nodeStates[n] === 'idle') setNodeState(n, 'skipped', 'пропущен');
+    });
+  }
+
+  else if (type === 'node_error') {
+    setNodeState(node, 'error', 'ошибка');
+    addLog(node, message || 'ошибка', 'node_error');
+  }
+
+  else if (type === 'sub_step') {
+    setNodeState(node, 'active', message || '');
+    addLog(node, message || '', 'sub_step');
+  }
+
+  else if (type === 'code') {
+    showCode(data || '');
+    addLog('coder', 'код сгенерирован', 'node_done');
+  }
+
+  else if (type === 'result') {
+    showResult(data || '');
+    addLog('submitter', data?.slice(0,60) || 'сдано', 'result');
+  }
+
+  else if (type === 'error') {
+    addLog('system', message || 'неизвестная ошибка', 'node_error');
+    updateStatus('error', 'ошибка');
+  }
+
+  else if (type === 'done') {
+    finishRun();
+  }
+}
+
+// ─── Log ─────────────────────────────────────────────────────────────────────
+function addLog(node, msg, type) {
+  const panel = document.getElementById('logPanel');
+  const now = new Date();
+  const ts = now.toTimeString().slice(0, 8);
+  const color = _nodeColors[node] || '#7d8590';
+
+  const div = document.createElement('div');
+  div.className = 'log-entry ' + (type || '');
+  div.innerHTML = `<span class="log-time">${ts}</span><span class="log-node" style="color:${color}">${node}</span><span class="log-msg">${escHtml(msg)}</span>`;
+  panel.appendChild(div);
+  panel.scrollTop = panel.scrollHeight;
+}
+
+// ─── Code ────────────────────────────────────────────────────────────────────
+function showCode(code) {
+  _currentCode = code;
+  const body = document.getElementById('codeBody');
+  const title = document.getElementById('codeTitle');
+  title.textContent = 'сгенерированный код (python)';
+  const pre = document.createElement('pre');
+  const codeEl = document.createElement('code');
+  codeEl.className = 'language-python';
+  codeEl.textContent = code;
+  pre.appendChild(codeEl);
+  body.innerHTML = '';
+  body.appendChild(pre);
+  hljs.highlightElement(codeEl);
+}
+
+function showResult(result) {
+  const banner = document.getElementById('resultBanner');
+  banner.textContent = '✓ ' + result;
+  banner.style.display = 'block';
+}
+
+function copyCode() {
+  if (!_currentCode) { toast('нет кода для копирования'); return; }
+  navigator.clipboard.writeText(_currentCode).then(() => toast('скопировано!'));
+}
+
+// ─── Run control ─────────────────────────────────────────────────────────────
+async function startRun() {
+  const taskId   = document.getElementById('taskId').value.trim() || 'task-001';
+  const taskText = document.getElementById('taskText').value.trim();
+  const dryRun   = document.getElementById('dryRun').checked;
+
+  if (!taskText) { toast('введи текст задачи'); return; }
+
+  resetUI();
+  setRunning(true);
+  updateStatus('running', 'запуск...');
+
+  let runId;
+  try {
+    const res = await fetch('/api/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task_id: taskId, task_text: taskText, dry_run: dryRun }),
+    });
+    const data = await res.json();
+    runId = data.run_id;
+  } catch (e) {
+    toast('ошибка подключения к серверу: ' + e.message);
+    setRunning(false);
+    return;
+  }
+
+  addLog('system', `run_id: ${runId}`, 'info');
+
+  _evtSource = new EventSource('/api/stream/' + runId);
+  _evtSource.onmessage = e => {
+    try { handleEvent(JSON.parse(e.data)); } catch {}
+  };
+  _evtSource.onerror = () => {
+    if (_evtSource.readyState === EventSource.CLOSED) {
+      finishRun();
+    }
+  };
+}
+
+function stopRun() {
+  if (_evtSource) { _evtSource.close(); _evtSource = null; }
+  finishRun();
+  toast('остановлено');
+}
+
+function finishRun() {
+  if (_evtSource) { _evtSource.close(); _evtSource = null; }
+  setRunning(false);
+  updateStatus('done', 'завершено');
+  clearInterval(_timerInterval);
+}
+
+// ─── UI helpers ──────────────────────────────────────────────────────────────
+function resetUI() {
+  // Reset node states
+  Object.keys(_nodeStates).forEach(n => {
+    _nodeStates[n] = 'idle';
+    setNodeState(n, 'idle', 'idle');
+    if (NODE_ARROWS[n]) setArrowState(NODE_ARROWS[n], '');
+  });
+  // Clear log
+  document.getElementById('logPanel').innerHTML = '';
+  // Clear code
+  _currentCode = '';
+  document.getElementById('codeBody').innerHTML = `<div class="code-placeholder"><div class="icon">⌥</div><div>код появится здесь после генерации</div></div>`;
+  document.getElementById('codeTitle').textContent = 'код';
+  document.getElementById('resultBanner').style.display = 'none';
+  // Timer
+  _startTime = Date.now();
+  clearInterval(_timerInterval);
+  _timerInterval = setInterval(() => {
+    const s = Math.floor((Date.now() - _startTime) / 1000);
+    document.getElementById('timer').textContent = `${s}s`;
+  }, 500);
+}
+
+function setRunning(v) {
+  document.getElementById('runBtn').disabled = v;
+  document.getElementById('stopBtn').style.display = v ? 'inline-block' : 'none';
+}
+
+function updateStatus(state, label) {
+  const dot = document.getElementById('statusDot');
+  const lbl = document.getElementById('statusLabel');
+  dot.className = 'status-dot ' + state;
+  lbl.textContent = label || state;
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+let _toastTimer;
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(() => el.classList.remove('show'), 2500);
+}
+</script>
+</body>
+</html>

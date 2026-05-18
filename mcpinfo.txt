@@ -1,0 +1,41 @@
+[23.04.2026 19:15] Aлександр Примаков: "gitea": {
+      "command": "uvx",
+      "args": [
+        "--refresh",
+        "--extra-index-url",
+        "https://nikitatsym.github.io/gitea-mcp/simple",
+        "gitea-mcp"
+      ],
+      "env": {
+        "GITEA_URL": "https://git.bro-js.ru",
+        "GITEA_TOKEN": "TOKEN"
+      }
+    },
+[23.04.2026 19:54] Marat F: GITEA_CONFIG = StdioServerParameters(
+    command=UVX_PATH,
+    args=[
+        "--refresh",
+        "--extra-index-url",
+        "https://nikitatsym.github.io/gitea-mcp/simple",
+        "gitea-mcp"
+    ],
+    env={
+        **os.environ,
+        "GITEA_URL": "https://git.bro-js.ru",
+        "GITEA_TOKEN": "" # <--- ЗАМЕНИ НА СВОЙ GITEA ТОКЕН
+    }
+)
+[05.05.2026 19:45] Кирилл: "gitea": {
+                    "transport": "stdio",
+      "command": "uvx",
+      "args": [
+        "--refresh",
+        "--extra-index-url",
+        "https://nikitatsym.github.io/gitea-mcp/simple",
+        "gitea-mcp"
+      ],
+      "env": {
+        "GITEA_URL": "https://git.brojs.ru",
+        "GITEA_TOKEN": ""
+      }
+    }
