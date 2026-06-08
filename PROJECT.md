@@ -33,8 +33,7 @@
 | Live run конкретной | `python -m orchestrator.main run --auto --task-id <ObjectId>` |
 | Live, новое если rework нет | `python -m orchestrator.main run --auto --include-new` |
 | Dry-run (без сдачи) | `python -m orchestrator.main run --auto --dry-run` |
-| Из файла (legacy) | `python run_task.py taskinfo\task1info.txt task-001 --auto --dry-run` |
-| Demo visual | `python demo_visual.py` |
+| Из файла (legacy) | `python run_task.py <path-to-task.txt> task-001 --auto --dry-run` |
 | MCP tools | `python -m orchestrator.main tools` |
 
 ## Directory Structure
@@ -56,11 +55,9 @@ CucumbersSWAGIntelligence/
 │   ├── mcp_client.py             — gitea + journal MCP server configs
 │   ├── runlog.py                 — файловый лог (logs/<task>_<ts>.log)
 │   └── visualizer.py             — Rich Live dashboard
-├── taskinfo/                     — *.txt с условиями (legacy путь без MCP)
 ├── logs/                         — файловые логи прогонов
 ├── solutions/                    — локальные копии (fallback)
-├── run_task.py                   — legacy entrypoint (файл-задание)
-└── demo_visual.py                — демо визуала без LLM
+└── run_task.py                   — legacy entrypoint (произвольный .txt с условием)
 ```
 
 ## File Conventions

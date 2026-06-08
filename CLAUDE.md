@@ -37,11 +37,8 @@ python -m orchestrator.main run --auto --include-new
 # Без сдачи: fetch → code → test → СТОП (Gitea и журнал не дёргаются)
 python -m orchestrator.main run --auto --dry-run
 
-# Из локального файла (legacy путь, без MCP)
-python run_task.py taskinfo\task1info.txt task-001 --auto --dry-run
-
-# Демо визуала без LLM
-python demo_visual.py
+# Из локального файла (legacy путь, без MCP) — условие в произвольном .txt
+python run_task.py <path-to-task.txt> task-001 --auto --dry-run
 
 # Список MCP-инструментов (gitea + journal)
 python -m orchestrator.main tools
@@ -218,9 +215,7 @@ src/orchestrator/
     submitter.py          — Gitea REST API + структурированный return для journal
     journal_publisher.py  — task_update_answer + task_submit + status (без LLM)
   main.py                 — typer CLI: run / tools / list
-run_task.py               — legacy entrypoint (файл-задание)
-demo_visual.py            — демо визуала без LLM
-taskinfo/                 — *.txt с условиями (legacy)
+run_task.py               — legacy entrypoint (произвольный .txt с условием)
 logs/                     — файловые логи прогонов
 solutions/                — локальные копии (fallback если Gitea недоступен)
 ```
