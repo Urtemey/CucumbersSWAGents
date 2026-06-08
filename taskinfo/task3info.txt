@@ -1,0 +1,113 @@
+Практическое задание №3: Память и подтверждение действий
+Цель
+Доработать агента из предыдущих заданий: добавить память разговора и механизм подтверждения каждого вызова инструмента пользователем.
+
+Что нужно добавить
+1. Установить зависимость
+pip install rich
+rich — библиотека для красивого вывода в консоль. Заменяет стандартный print.
+
+from rich.console import Console
+
+console = Console()
+console.print("Привет")                    # обычный вывод
+console.print("текст", end="")             # без переноса строки
+2. Память — MemorySaver и thread_id
+Без памяти агент не помнит предыдущих сообщений. Чтобы это исправить:
+
+from langgraph.checkpoint.memory import MemorySaver
+
+memory = MemorySaver()
+
+agent = create_agent(
+    model=llm,
+    tools=[my_tool],
+    system_prompt='...',
+    checkpointer=memory,   # подключаем память
+)
+Каждый вызов агента нужно передавать config с идентификатором разговора:
+
+config = {"configurable": {"thread_id": "разговор-1"}}
+
+agent.stream({"messages": [...]}, config=config, ...)
+Один и тот же thread_id = один разговор с общей историей. Разные thread_id = независимые разговоры.
+
+3. Пауза перед инструментом — interrupt_before
+agent = create_agent(
+    ...
+    checkpointer=memory,        # обязателен для паузы
+    interrupt_before=['tools'], # останавливаться перед каждым вызовом инструмента
+)
+checkpointer обязателен — без него некуда сохранять состояние паузы.
+
+4. Обнаружение паузы в стриме
+При наличии interrupt_before агент во время стрима посылает специальный чанк с ключом '__interrupt__'. Его нужно поймать прямо в цикле обработки чанков:
+
+if '__interrupt__' in chunk_data and state.next == ('tools',):
+    # агент остановился — спросить у пользователя
+    ...
+state.next == ('tools',) — дополнительная проверка что агент действительно ждёт разрешения на вызов инструмента.
+
+Чтобы посмотреть что именно хочет сделать агент:
+
+state = agent.get_state(config)
+tool_call = state.values['messages'][-1].tool_calls[0]
+print(f'{tool_call["name"]}({tool_call["args"]})')
+5. Возобновление или отмена
+Если пользователь разрешает — вызываем ask_and_run рекурсивно, передав None вместо сообщения:
+
+answer = input('Разрешить? (Y/n): ')
+
+if answer.lower().strip() == 'y':
+    ask_and_run(None, config)   # None = возобновить с того места где остановились
+else:
+    console.print('Отменено')
+    break
+6. Итоговая структура функции ask_and_run
+def ask_and_run(user_input, config):
+    for chunk in agent.stream(user_input, config=config, stream_mode=['messages', 'updates']):
+        state = agent.get_state(config)
+        chunk_type, chunk_data = chunk
+
+        if chunk_type == 'messages':
+            # потоковый вывод токенов (как в предыдущем задании)
+            ...
+
+        if chunk_type == 'updates':
+            # вывод вызовов инструментов (как в предыдущем задании)
+            ...
+
+        if '__interrupt__' in chunk_data and state.next == ('tools',):
+            # пауза — спросить подтверждение
+            ...
+7. Чат-цикл
+while True:
+    user_input = input('\nВы: ')
+    if user_input == 'exit':
+        break
+
+    ask_and_run(
+        {"messages": [{"role": "human", "content": user_input}]},
+        config,
+    )
+Ожидаемый результат
+Вы: Какая погода в Казани сегодня и завтра?
+
+ --- --- --- 
+
+get_price({'city': 'Казань', 'date': 'сегодня'})
+Агент хочет вызвать утилиту get_price({'city': 'Казань', 'date': 'сегодня'})
+Разрешить? (Y/n): y
+
+ --- --- --- 
+
+get_price({'city': 'Казань', 'date': 'завтра'})
+Агент хочет вызвать утилиту get_price({'city': 'Казань', 'date': 'завтра'})
+Разрешить? (Y/n): n
+Отменено
+
+Вы: А там же через неделю?   ← агент помнит что речь о Казани
+
+ --- --- --- 
+
+...
