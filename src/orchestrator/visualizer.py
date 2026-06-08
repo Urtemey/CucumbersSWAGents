@@ -21,37 +21,53 @@ from rich.text import Text
 
 # ── Константы ────────────────────────────────────────────────────────────────
 
-ALL_NODES = ["supervisor", "task_fetcher", "coder", "tester", "submitter"]
+ALL_NODES = ["supervisor", "task_fetcher", "coder", "tester", "submitter", "journal_publisher"]
 
 SPINNERS = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+PULSE    = ["◐", "◓", "◑", "◒"]                    # пульс активной ноды
+SPARKS   = ["✦", "✧", "✶", "✷", "✸", "✹"]          # искры в баннере
 FLOW     = ["·", "·", "▸", "·", "·", "▸", "·"]     # анимация потока данных
+# Радужный градиент для активной flow-стрелки
+RAINBOW  = ["bright_red", "bright_yellow", "bright_green",
+            "bright_cyan", "bright_blue", "bright_magenta"]
 
 NODE_LABEL = {
-    "supervisor":   "SUPERVISOR",
-    "task_fetcher": "TASK FETCH",
-    "coder":        "CODER     ",
-    "tester":       "TESTER    ",
-    "submitter":    "SUBMITTER ",
+    "supervisor":        "SUPERVISOR",
+    "task_fetcher":      "TASK FETCH",
+    "coder":             "CODER     ",
+    "tester":            "TESTER    ",
+    "submitter":         "SUBMITTER ",
+    "journal_publisher": "JOURNAL   ",
 }
 NODE_COLOR = {
-    "supervisor":   "bright_cyan",
-    "task_fetcher": "magenta",
-    "coder":        "yellow",
-    "tester":       "bright_magenta",
-    "submitter":    "bright_blue",
+    "supervisor":        "bright_cyan",
+    "task_fetcher":      "magenta",
+    "coder":             "yellow",
+    "tester":            "bright_magenta",
+    "submitter":         "bright_blue",
+    "journal_publisher": "bright_green",
 }
 
 BANNER = """\
-  ╔══════════════════════════════════════════════════╗
-  ║  ██████╗██╗   ██╗ ██████╗██╗   ██╗███╗   ███╗  ║
-  ║ ██╔════╝██║   ██║██╔════╝██║   ██║████╗ ████║  ║
-  ║ ██║     ██║   ██║██║     ██║   ██║██╔████╔██║  ║
-  ║ ╚██████╗╚██████╔╝╚██████╗╚██████╔╝██║ ╚═╝ ██║  ║
-  ║  ╚═════╝ ╚═════╝  ╚═════╝ ╚═════╝ ╚═╝     ╚═╝  ║
-  ║        S  W  A  G  E  N  T  S                   ║
-  ║        deep-agent orchestrator  v1.0            ║
-  ╚══════════════════════════════════════════════════╝\
+  ██████╗██╗   ██╗ ██████╗██╗   ██╗███╗   ███╗██████╗ ███████╗██████╗ ███████╗
+ ██╔════╝██║   ██║██╔════╝██║   ██║████╗ ████║██╔══██╗██╔════╝██╔══██╗██╔════╝
+ ██║     ██║   ██║██║     ██║   ██║██╔████╔██║██████╔╝█████╗  ██████╔╝███████╗
+ ██║     ██║   ██║██║     ██║   ██║██║╚██╔╝██║██╔══██╗██╔══╝  ██╔══██╗╚════██║
+ ╚██████╗╚██████╔╝╚██████╗╚██████╔╝██║ ╚═╝ ██║██████╔╝███████╗██║  ██║███████║
+  ╚═════╝ ╚═════╝  ╚═════╝ ╚═════╝ ╚═╝     ╚═╝╚═════╝ ╚══════╝╚═╝  ╚═╝╚══════╝
 """
+
+# Цвета для каждой строки баннера — градиент cyan → magenta
+BANNER_GRADIENT = [
+    "bold bright_cyan",
+    "bold cyan",
+    "bold bright_blue",
+    "bold magenta",
+    "bold bright_magenta",
+    "bold bright_red",
+]
+
+SUBTITLE = "  ✦  peak  slop  technologies  ·  deep-agent  orchestrator  ·  v2.0  ✦"
 
 # ── Notify-система ────────────────────────────────────────────────────────────
 
@@ -143,6 +159,7 @@ class AgentVisualizer:
         self._log: deque = deque(maxlen=80)
         self._code       = ""
         self._result     = ""
+        self._journal_status = ""
         self._test_results = ""
         self._tick       = 0
         self._start_time = time.time()
@@ -158,9 +175,16 @@ class AgentVisualizer:
     async def __aenter__(self) -> "AgentVisualizer":
         self._running    = True
         self._start_time = time.time()
-        # Печатаем баннер ДО Live (всегда видно)
+        # Печатаем баннер ДО Live (всегда видно) — построчно с градиентом
         _banner_console = Console(highlight=False)
-        _banner_console.print(Text(BANNER, style="bold cyan"))
+        banner_lines = BANNER.splitlines()
+        for i, line in enumerate(banner_lines):
+            style = BANNER_GRADIENT[i % len(BANNER_GRADIENT)]
+            _banner_console.print(Text(line, style=style))
+        # Подзаголовок — анимированные искры по бокам
+        sub = Text()
+        sub.append(SUBTITLE, style="bold bright_yellow")
+        _banner_console.print(sub)
         _banner_console.print()
 
         self._live = Live(
@@ -227,6 +251,11 @@ class AgentVisualizer:
             self._result = result
             self._add_log("submitter", result[:80], "result")
 
+    def set_journal_status(self, status: str) -> None:
+        if status:
+            self._journal_status = status
+            self._add_log("journal_publisher", status[:80], "result")
+
     def reset_for_retry(self) -> None:
         """Сбросить состояние нод для повторной генерации."""
         self._states = {n: "idle" for n in ALL_NODES}
@@ -290,37 +319,42 @@ class AgentVisualizer:
 
     def _node_lines(self, node: str) -> list[Text]:
         """
-        Рендер ноды как 3–4 строки компактного box:
-          ║ ┌──────────────┐
-          ║ │ LABEL    icon│
-          ║ │ sub-msg      │  (только если active)
-          ║ └──────────────┘
-        Всё влезает в ~18 символов — не вылезает за узкую панель.
+        Рендер ноды с состоянием:
+          active  → rounded corners ╭─╮╰─╯ + пульсирующая иконка
+          done    → double-line ╔═╗╚═╝ + ✓
+          error   → ╳ кресты + ✗
+          skipped/idle → тонкая dim рамка
         """
-        W = 14   # ширина содержимого box (без │)
+        W = 14
         state = self._states.get(node, "idle")
         color = NODE_COLOR.get(node, "white")
         label = NODE_LABEL.get(node, node.upper()).strip()[:10]
         sub   = self._sub_msgs.get(node, "")[:W-1]
 
         if state == "active":
+            tl, tr, bl, br, h = "╭", "╮", "╰", "╯", "─"
             border_s = f"bold {color}"
             label_s  = f"bold {color}"
-            icon, icon_s = self._spin(), "bold yellow"
+            icon = PULSE[self._tick % len(PULSE)]
+            icon_s = f"bold {color}"
         elif state == "done":
+            tl, tr, bl, br, h = "╔", "╗", "╚", "╝", "═"
             border_s = label_s = "green"
-            icon, icon_s = "✓", "bold green"
+            icon, icon_s = "✓", "bold bright_green"
         elif state == "error":
-            border_s = label_s = "red"
-            icon, icon_s = "✗", "bold red"
+            tl, tr, bl, br, h = "╳", "╳", "╳", "╳", "─"
+            border_s = label_s = "bold red"
+            icon, icon_s = "✗", "bold bright_red"
         elif state == "skipped":
+            tl, tr, bl, br, h = "·", "·", "·", "·", "·"
             border_s = label_s = icon_s = "dim"
             icon = "─"
         else:
+            tl, tr, bl, br, h = "┌", "┐", "└", "┘", "─"
             border_s = label_s = icon_s = "dim"
             icon = "○"
 
-        top = Text(); top.append("  ║ ┌" + "─"*W + "┐", style=border_s)
+        top = Text(); top.append("  ║ " + tl + h*W + tr, style=border_s)
 
         mid = Text()
         mid.append("  ║ │ ", style=border_s)
@@ -333,11 +367,11 @@ class AgentVisualizer:
         if sub and state == "active":
             sm = Text()
             sm.append("  ║ │ ", style=border_s)
-            sm.append(sub.ljust(W - 1), style="dim italic")
+            sm.append(sub.ljust(W - 1), style="italic bright_white")
             sm.append("│", style=border_s)
             lines.append(sm)
 
-        bot = Text(); bot.append("  ║ └" + "─"*W + "┘", style=border_s)
+        bot = Text(); bot.append("  ║ " + bl + h*W + br, style=border_s)
         lines.append(bot)
         return lines
 
@@ -377,13 +411,24 @@ class AgentVisualizer:
         lines.append(Text("  ║ └──────────────┘", style=sv_bs))
 
         # ── Sub-agents ──
-        for node in ["task_fetcher", "coder", "tester", "submitter"]:
-            active = self._states[node] == "active"
-            # соединитель
+        for node in ["task_fetcher", "coder", "tester", "submitter", "journal_publisher"]:
+            state = self._states[node]
+            active = state == "active"
+            done = state == "done"
+            # соединитель: анимированный поток для активной ноды
             t = Text()
-            t.append("  ║ │", style="dim")
             if active:
-                t.append(f"  {self._flow()}", style="yellow")
+                # Радужная пульсирующая стрелка ▼ с искрой
+                color = RAINBOW[self._tick % len(RAINBOW)]
+                t.append("  ║ ", style="dim")
+                t.append("▼", style=f"bold {color}")
+                spark = SPARKS[self._tick % len(SPARKS)]
+                t.append(f"  {spark}", style=f"bold {color}")
+            elif done:
+                t.append("  ║ ", style="dim")
+                t.append("▼", style="green")
+            else:
+                t.append("  ║ │", style="dim")
             lines.append(t)
             # box ноды
             lines.extend(self._node_lines(node))
@@ -394,8 +439,9 @@ class AgentVisualizer:
 
         return Panel(
             Group(*lines),
-            title="[bold blue]PIPELINE[/bold blue]",
-            border_style="blue",
+            title="[bold bright_cyan]  ⚡ PIPELINE ⚡  [/bold bright_cyan]",
+            border_style="bright_cyan",
+            padding=(0, 0),
         )
 
     def _render_log_panel(self) -> Panel:
@@ -420,14 +466,37 @@ class AgentVisualizer:
                 f"[{color}]{node}[/{color}]",
                 f"[{ms}]{entry['message'][:55]}[/{ms}]",
             )
-        return Panel(tbl, title="[bold blue]  СОБЫТИЯ  [/bold blue]", border_style="blue")
+        return Panel(
+            tbl,
+            title="[bold bright_blue]  📡 СОБЫТИЯ  [/bold bright_blue]",
+            border_style="bright_blue",
+        )
 
     def _render_bottom_panel(self) -> Panel:
         if self._result:
-            t = Text()
-            t.append("  ✓ Сдано: ", style="bold bright_green")
-            t.append(self._result, style="green")
-            return Panel(t, title="[bold green]  РЕЗУЛЬТАТ  [/bold green]", border_style="green")
+            # Эффектный финальный экран
+            content = Text()
+            content.append("\n")
+            content.append("  ✦ ✧ ✶ ✷ ", style="bold bright_yellow")
+            content.append("РЕШЕНИЕ СДАНО", style="bold bright_green")
+            content.append(" ✷ ✶ ✧ ✦\n\n", style="bold bright_yellow")
+            content.append("  📦 Gitea: ", style="")
+            content.append(self._result, style="bold bright_green")
+            if self._journal_status:
+                content.append("\n  📓 Журнал: ", style="")
+                # skipped → dim, ошибки → красный, всё остальное → зелёное
+                js = self._journal_status
+                if js.startswith("skipped") or "fail" in js.lower():
+                    js_style = "yellow" if "skipped" in js else "bold red"
+                else:
+                    js_style = "bold bright_green"
+                content.append(js, style=js_style)
+            content.append("\n")
+            return Panel(
+                Align.center(content),
+                title="[bold bright_green]  🎉 УСПЕХ 🎉  [/bold bright_green]",
+                border_style="bright_green",
+            )
 
         # Результаты тестирования (после tester)
         if self._test_results:
@@ -585,23 +654,76 @@ class AgentVisualizer:
             )
 
         # ── Оценка ──
+        # Разбираем markdown-таблицу `| col | col | ... |` в нормальную Rich Table.
+        # Слабая модель пишет именно такой формат — раньше мы рендерили его сырым
+        # текстом, и узкая панель ломала выравнивание. Теперь — настоящие колонки.
         if score_lines:
-            score_tbl = Table(show_header=False, box=None, padding=(0, 1), expand=True)
-            score_tbl.add_column("row", ratio=1)
+            from rich import box as _rich_box
+
+            # Соберём все строки-таблицы (начинаются с '|'), отделим заголовок-разделитель
+            table_rows: list[list[str]] = []
+            non_table_lines: list[str] = []
             for sl in score_lines:
                 ss = sl.strip()
-                if ss.startswith("|") and not all(c in "-|─ " for c in ss):
+                if not ss:
+                    continue
+                if ss.startswith("|"):
+                    # Разделитель |----|----|----|---- — пропускаем
+                    if all(c in "-|─: " for c in ss):
+                        continue
                     parts = [p.strip() for p in ss.strip("|").split("|")]
-                    is_total = len(parts) > 0 and "ИТОГО" in parts[0].upper()
+                    table_rows.append(parts)
+                elif ss.startswith("ОЦЕНКА:"):
+                    continue   # заголовок — уже есть в title панели
+                else:
+                    non_table_lines.append(ss)
+
+            # Рендерим таблицу с заголовком + строками
+            if table_rows:
+                header = table_rows[0]
+                body = table_rows[1:]
+                rich_tbl = Table(
+                    show_header=True,
+                    header_style="bold bright_cyan",
+                    box=_rich_box.SIMPLE_HEAVY,
+                    padding=(0, 1),
+                    expand=True,
+                    border_style="bright_cyan",
+                )
+                # Эвристика: 1-я колонка — критерий (растяжимая, оборачивается),
+                # средние — числа (узкие, по центру), последняя — комментарий (растяжимая)
+                n = len(header)
+                for i, h in enumerate(header):
+                    if i == 0:
+                        rich_tbl.add_column(h, ratio=3, overflow="fold", no_wrap=False)
+                    elif i == n - 1 and n >= 3:
+                        rich_tbl.add_column(h, ratio=5, overflow="fold", no_wrap=False)
+                    else:
+                        rich_tbl.add_column(h, justify="center", width=6, no_wrap=True)
+
+                for row in body:
+                    # выровнять длину строки под заголовок
+                    row = (row + [""] * n)[:n]
+                    is_total = any("ИТОГО" in c.upper() for c in row)
                     style = "bold bright_green" if is_total else ""
-                    score_tbl.add_row(Text(ss, style=style))
-                elif ss.startswith("ПРОБЛЕМЫ:"):
-                    score_tbl.add_row(Text(ss, style="bold yellow"))
-                elif ss.startswith("-"):
-                    score_tbl.add_row(Text(ss, style="yellow"))
-                elif ss:
-                    score_tbl.add_row(Text(ss, style="dim"))
-            renderables.append(score_tbl)
+                    cells = [Text(c, style=style) for c in row]
+                    rich_tbl.add_row(*cells)
+
+                renderables.append(rich_tbl)
+
+            # ── Проблемы / прочие строки ──
+            if non_table_lines:
+                probs = Table(show_header=False, box=None, padding=(0, 1), expand=True)
+                probs.add_column("ico", width=2, no_wrap=True)
+                probs.add_column("msg", ratio=1, overflow="fold")
+                for nl in non_table_lines:
+                    if nl.startswith("ПРОБЛЕМЫ:"):
+                        probs.add_row("⚠", Text("ПРОБЛЕМЫ", style="bold yellow"))
+                    elif nl.startswith("-"):
+                        probs.add_row("·", Text(nl.lstrip("- ").strip(), style="yellow"))
+                    else:
+                        probs.add_row("", Text(nl, style="dim"))
+                renderables.append(probs)
 
         # ── Вердикт ──
         if verdict_line or percent_line:
@@ -626,24 +748,51 @@ class AgentVisualizer:
 
     def _make_layout(self) -> Layout:
         elapsed = int(time.time() - self._start_time)
+        mins, secs = divmod(elapsed, 60)
+
+        # Считаем прогресс: сколько нод завершено из пайплайна
+        pipeline = ["task_fetcher", "coder", "tester", "submitter", "journal_publisher"]
+        done_n = sum(1 for n in pipeline if self._states[n] in ("done", "skipped"))
+        total_n = len(pipeline)
+        progress_pct = int(done_n * 100 / total_n) if total_n else 0
+        bar_w = 20
+        filled = int(bar_w * done_n / total_n) if total_n else 0
+        bar = "▰" * filled + "▱" * (bar_w - filled)
 
         hdr = Text()
+        # Логотип-огурец с пульсом
+        pulse_col = RAINBOW[self._tick % len(RAINBOW)]
         hdr.append("  🥒 ", style="")
-        hdr.append("CucumbersSWAGents", style="bold cyan")
+        hdr.append("CUCUMBERS", style=f"bold {pulse_col}")
+        hdr.append(" SWAG ", style="bold bright_yellow")
+        hdr.append("INTELLIGENCE", style="bold bright_magenta")
         if self._task_id:
-            hdr.append(f"  ·  {self._task_id}", style="dim")
-        hdr.append(f"  ·  ⏱ {elapsed}s", style="dim")
+            hdr.append("   │   ", style="dim")
+            hdr.append("📋 ", style="")
+            hdr.append(self._task_id, style="bold cyan")
+        hdr.append("   │   ", style="dim")
+        hdr.append("⏱ ", style="")
+        hdr.append(f"{mins:02d}:{secs:02d}", style="bold bright_white")
+        hdr.append("   │   ", style="dim")
+        # Прогресс-бар
+        hdr.append("[", style="dim")
+        hdr.append(bar[:filled], style="bold bright_green")
+        hdr.append(bar[filled:], style="dim")
+        hdr.append("]", style="dim")
+        hdr.append(f" {progress_pct:3d}%", style="bold bright_green")
         if self._active_node:
-            hdr.append("  ·  ", style="dim")
-            hdr.append(self._active_node, style="bold yellow")
-            hdr.append(f" {self._spin()}", style="yellow")
+            hdr.append("   │   ", style="dim")
+            spark = SPARKS[self._tick % len(SPARKS)]
+            hdr.append(f"{spark} ", style=f"bold {pulse_col}")
+            hdr.append(self._active_node.upper(), style="bold bright_yellow")
+            hdr.append(f" {self._spin()}", style=f"bold {pulse_col}")
 
         # body: фиксированный — ровно по высоте графа (5 нод = ~27 строк с рамками)
         # bottom: ratio=1 — забирает всё оставшееся место под код/результаты
         layout = Layout()
         layout.split_column(
             Layout(Panel(hdr, style="dim"), name="header", size=3),
-            Layout(name="body", size=27),
+            Layout(name="body", size=32),
             Layout(self._render_bottom_panel(), name="bottom", ratio=1),
         )
         layout["body"].split_row(

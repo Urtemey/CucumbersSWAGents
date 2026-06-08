@@ -1,10 +1,3 @@
-"""
-MCP-клиент: подключается к gitea-mcp и platform-mcp,
-возвращает инструменты как LangChain Tool-объекты.
-
-langchain-mcp-adapters >= 0.1.0: MultiServerMCPClient не context manager,
-нужно вызывать await client.get_tools() напрямую.
-"""
 import os
 import shutil
 from typing import Any
@@ -42,11 +35,17 @@ def build_gitea_server_config() -> dict[str, Any]:
 
 
 def build_platform_server_config() -> dict[str, Any]:
-    headers = {}
+    """
+    Journal MCP: https://platform.brojs.ru/jrnl-bh/api/mcp
+    Транспорт: http (НЕ streamable_http). Auth: Bearer <JOURNAL_TOKEN>.
+    Инструменты: courses_list, lessons_list, tasks_list, task_text, task_get,
+    task_update_answer, task_submit, task_comment, task_submission_status.
+    """
+    headers: dict[str, str] = {}
     if cfg.platform_token:
         headers["Authorization"] = f"Bearer {cfg.platform_token}"
     return {
-        "transport": "streamable_http",
+        "transport": "http",
         "url": cfg.platform_mcp_url,
         "headers": headers,
     }

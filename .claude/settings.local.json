@@ -55,7 +55,14 @@
       "PowerShell(cd \"C:\\\\Users\\\\servak\\\\CucumbersSWAGents\"; foreach \\($f in @\\('src/orchestrator/agents/tester.py','src/orchestrator/visualizer.py'\\)\\) { $r = & .venv\\\\Scripts\\\\python.exe -c \"import py_compile; py_compile.compile\\('$f', doraise=True\\)\" 2>&1; if \\($?\\) { \"OK  $f\" } else { \"ERR`n$r\" } })",
       "PowerShell(Remove-Item *)",
       "PowerShell(try { $r = Invoke-RestMethod -Uri \"http://192.168.0.120:1234/v1/models\" -TimeoutSec 8; $r.data | ForEach-Object { $_.id } } catch { \"ОШИБКА: $\\($_.Exception.Message\\)\" })",
-      "Bash(gh auth *)"
+      "Bash(gh auth *)",
+      "PowerShell($env:PYTHONUTF8=\"1\"; python run_task.py taskinfo\\\\task3info.txt task-003)",
+      "PowerShell($env:PYTHONUTF8=\"1\"; & .venv\\\\Scripts\\\\Activate.ps1; python run_task.py taskinfo\\\\task3info.txt task-003)",
+      "PowerShell($env:PYTHONUTF8=\"1\"; $env:PYTHONPATH=\"src\"; python run_task.py taskinfo\\\\task3info.txt task-003)",
+      "PowerShell(uv pip *)",
+      "PowerShell($env:PYTHONUTF8=\"1\"; python run_task.py taskinfo\\\\task1info.txt task-001)",
+      "Bash(xargs cat)",
+      "Bash(python *)"
     ]
   }
 }

@@ -21,7 +21,31 @@ from orchestrator import visualizer as viz
 # ── Фетчинг документации ──────────────────────────────────────────────────────
 
 def _extract_urls(text: str) -> list[str]:
-    return re.findall(r"https?://[^\s\)\]\"'<>]+", text)
+    """
+    Извлекает URL'ы для подгрузки документации, отфильтровывая:
+      - localhost / 127.0.0.1 (примеры конфига LM Studio в условиях задания)
+      - example.com / your-domain.com / *.local (заглушки)
+      - URL'ы на платформу/Gitea/нашу инфру (это не доки)
+      - URL'ы внутри блоков кода (примеры подключения, не доки)
+    Слабые модели и без того тонут в контексте — лишних доков не нужно.
+    """
+    # Убираем содержимое блоков ```...``` чтобы не цеплять примерные URL'ы
+    code_stripped = re.sub(r"```[\s\S]*?```", " ", text)
+    urls = re.findall(r"https?://[^\s\)\]\"'<>]+", code_stripped)
+
+    SKIP_HOSTS = (
+        "localhost", "127.0.0.1", "0.0.0.0", "example.com", "example.org",
+        "your-domain", "platform.brojs.ru", "git.brojs.ru", "bro-js.ru",
+    )
+    filtered: list[str] = []
+    for u in urls:
+        low = u.lower()
+        if any(h in low for h in SKIP_HOSTS):
+            continue
+        if low.endswith((".local", ".test")):
+            continue
+        filtered.append(u.rstrip(".,;"))   # убираем хвостовую пунктуацию
+    return filtered
 
 
 def _strip_html(raw: str) -> str:
@@ -152,27 +176,187 @@ SYSTEM_PROMPT = """Ты — агент получения заданий с уч
 """
 
 
+async def _journal_fetch(
+    platform_tools: list,
+    task_id: str,
+    include_new: bool = False,
+) -> tuple[str, str]:
+    """
+    Детерминированный фетч задания через Journal MCP (без LLM!).
+    Слабая модель в react-loop зависает на 30+ итерациях — обходим её полностью.
+
+    Семантика по умолчанию: ПЕРЕсдача — берём только задания,
+    которые преподаватель вернул на доработку (rework). Это сдачи в
+    status='todo' с непустым reworkComment.
+
+    Если include_new=True — fallback на новые todo-задания (без rework).
+
+    Возвращает (description, resolved_task_id) или ("", "") если не удалось.
+
+    Алгоритм:
+      1. tasks_list(status="todo") → JSON со списком сдач
+      2. Если task_id передан и совпадает — берём именно её (без фильтра rework)
+      3. Иначе фильтруем по reworkComment != "" → первая
+      4. Если rework нет и include_new — берём первую todo
+      5. Текст: task.description из tasks_list; короткий — добиваем task_text(taskId)
+    """
+    import json
+
+    by_name = {t.name: t for t in platform_tools}
+    tasks_list_tool = by_name.get("tasks_list")
+    task_text_tool = by_name.get("task_text")
+    if not tasks_list_tool:
+        return "", ""
+
+    # 1. tasks_list
+    viz.notify("task_fetcher", "Запрашиваю tasks_list (todo)...", "sub_step")
+    try:
+        raw = await tasks_list_tool.ainvoke({"status": "todo"})
+    except Exception as e:
+        viz.notify("task_fetcher", f"tasks_list ошибка: {type(e).__name__}", "sub_step")
+        return "", ""
+
+    # MCP-tools отдают list[{type:'text', text:'...json...'}]
+    json_text = ""
+    if isinstance(raw, list) and raw and isinstance(raw[0], dict) and "text" in raw[0]:
+        json_text = raw[0]["text"]
+    elif isinstance(raw, str):
+        json_text = raw
+    if not json_text:
+        return "", ""
+
+    try:
+        data = json.loads(json_text)
+        tasks = data.get("tasks", []) if isinstance(data, dict) else []
+    except (json.JSONDecodeError, AttributeError):
+        return "", ""
+
+    if not tasks:
+        viz.notify("task_fetcher", "Нет todo-заданий в журнале", "sub_step")
+        return "", ""
+
+    def _is_rework(t: dict) -> bool:
+        """Сдача возвращена преподавателем на доработку."""
+        return bool((t.get("reworkComment") or "").strip())
+
+    # 2. Явный task_id — точное совпадение (rework-фильтр не применяем)
+    chosen = None
+    if task_id:
+        for t in tasks:
+            candidate_ids = (
+                str(t.get("taskId", "")),
+                str(t.get("_id", "")),
+                str(t.get("submissionId", "")),
+                str(t.get("task", {}).get("_id", "")),
+            )
+            if task_id in candidate_ids:
+                chosen = t
+                break
+        if chosen is None:
+            viz.notify("task_fetcher", "taskId не найден в журнале", "sub_step")
+
+    # 3. Приоритет — rework (возвращённые на доработку), иначе новая todo.
+    # Параметр include_new оставлен для обратной совместимости, но больше
+    # не блокирует новые задания — без них агент простаивает.
+    if chosen is None:
+        rework = [t for t in tasks if _is_rework(t)]
+        if rework:
+            chosen = rework[0]
+            viz.notify("task_fetcher", f"Rework: {len(rework)} — беру первую", "sub_step")
+        else:
+            chosen = tasks[0]
+            viz.notify("task_fetcher", f"Rework нет — беру новую todo ({len(tasks)} доступно)", "sub_step")
+
+    real_task_id = str(chosen.get("taskId") or chosen.get("task", {}).get("_id") or "")
+    title = chosen.get("task", {}).get("title", "")
+    description = chosen.get("task", {}).get("description", "")
+    rework_comment = (chosen.get("reworkComment") or "").strip()
+    prev_answer = ""
+    answer_obj = chosen.get("answer") or {}
+    if isinstance(answer_obj, dict):
+        prev_answer = (answer_obj.get("content") or "").strip()
+
+    viz.notify("task_fetcher", f"Задание: {title[:50]}", "sub_step")
+    if rework_comment:
+        viz.notify("task_fetcher", f"⚠ REWORK: {rework_comment[:60]}", "sub_step")
+
+    # 3. Если description короткий — добиваем task_text
+    if task_text_tool and len(description) < 500 and real_task_id:
+        try:
+            tx_raw = await task_text_tool.ainvoke({"taskId": real_task_id})
+            tx = tx_raw[0]["text"] if isinstance(tx_raw, list) and tx_raw else (
+                tx_raw if isinstance(tx_raw, str) else ""
+            )
+            if tx and len(tx) > len(description):
+                description = tx
+        except Exception:
+            pass
+
+    # 4. Собираем финальный текст. Для rework — феедбэк препода ПЕРВЫМ блоком,
+    # чтобы дауньская модель его точно прочитала (primacy — самое важное в начале).
+    parts: list[str] = []
+    if title:
+        parts.append(f"# {title}")
+    if rework_comment:
+        parts.append(
+            "═══ КОММЕНТАРИЙ ПРЕПОДАВАТЕЛЯ ПО ВОЗВРАЩЁННОЙ СДАЧЕ ═══\n"
+            "Это ПЕРЕсдача. Преподаватель вернул предыдущее решение со следующим замечанием:\n\n"
+            f"{rework_comment}\n\n"
+            "ОБЯЗАТЕЛЬНО устрани это замечание в новом решении. Игнорировать комментарий нельзя."
+        )
+    parts.append(description)
+    if prev_answer and len(prev_answer) < 4000:
+        parts.append(
+            "═══ ТВОЯ ПРЕДЫДУЩАЯ СДАЧА (которую вернули) ═══\n"
+            f"{prev_answer}\n\n"
+            "Учти что именно ЭТО решение было отклонено по замечанию выше — не повторяй ту же ошибку."
+        )
+
+    full = "\n\n".join(parts)
+    return full, real_task_id
+
+
 def make_task_fetcher_node(platform_tools: list):
     llm = make_llm()
 
     if platform_tools:
-        agent = create_react_agent(llm, platform_tools, prompt=SYSTEM_PROMPT)
-
         async def node(state: OrchestratorState) -> dict:
             task_id = state.get("task_id", "")
-            user_msg = (
-                f"Получи задание с ID: {task_id}" if task_id
-                else "Получи список доступных заданий и выбери первое непройденное"
-            )
-            result = await agent.ainvoke({"messages": [HumanMessage(content=user_msg)]})
-            desc = result["messages"][-1].content
+            existing_desc = state.get("task_description", "").strip()
 
-            viz.notify("task_fetcher", "Фетчу документацию из ссылок...", "sub_step")
-            enriched = await _enrich_with_docs(desc)
+            # Если описание УЖЕ передано (из файла через run_task.py) — используем его,
+            # MCP не дёргаем
+            if existing_desc:
+                viz.notify("task_fetcher", "Описание передано — пропускаю MCP", "sub_step")
+                enriched = await _enrich_with_docs(existing_desc)
+                return {"task_description": enriched, "prepared": True}
+
+            # ── Детерминированный путь (быстрый, без LLM) ──
+            # include_new больше не блокирует — фетчим rework и новые задания одинаково.
+            viz.notify("task_fetcher", "Journal MCP (rework + новые)...", "sub_step")
+            desc, resolved_id = await _journal_fetch(platform_tools, task_id, include_new=True)
+            if desc and resolved_id:
+                viz.notify("task_fetcher", f"Получено {len(desc)} симв, task_id={resolved_id[:12]}", "sub_step")
+                viz.notify("task_fetcher", "Фетчу документацию из ссылок...", "sub_step")
+                enriched = await _enrich_with_docs(desc)
+                return {
+                    "task_description": enriched,
+                    "task_id": resolved_id,
+                    "prepared": True,
+                }
+
+            # MCP отдал пусто или без task_id — react-fallback УБРАН: он терял
+            # привязку к taskId и журналу всё равно нельзя было сдать. Лучше
+            # явно остановиться, чем писать «unknown» в Gitea без сдачи.
+            viz.notify(
+                "task_fetcher",
+                "MCP вернул пусто / без task_id — нечего решать, останавливаюсь",
+                "sub_step",
+            )
             return {
-                "task_description": enriched,
+                "task_description": "",
+                "task_id": "",
                 "prepared": True,
-                "messages": result["messages"],
             }
 
     else:

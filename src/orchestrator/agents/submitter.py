@@ -103,14 +103,27 @@ def make_submitter_node(gitea_tools: list):
                 json=payload,
             )
 
+            commit_sha = ""
+            html_url = ""
+            repo_url = f"{base}/{owner}/{repo}"
             if r_put.status_code in (200, 201):
-                html_url = r_put.json().get("content", {}).get("html_url", "")
-                result = f"OK: {html_url or f'{base}/{owner}/{repo}/src/branch/main/{file_path}'}"
+                resp = r_put.json()
+                html_url = resp.get("content", {}).get("html_url", "")
+                commit_sha = resp.get("commit", {}).get("sha", "")
+                result = f"OK: {html_url or f'{repo_url}/src/branch/main/{file_path}'}"
             else:
                 result = f"Gitea ошибка {r_put.status_code}: {r_put.text[:200]}"
 
         viz.notify("submitter", "Готово", "node_done")
-        return {"submission_result": result}
+        return {
+            "submission_result": result,
+            "solution_url": html_url,
+            "repo_url": repo_url,
+            "branch": "main",
+            "commit_sha": commit_sha,
+            "file_path": file_path,
+            "commit_message": f"feat: solution for {task_id}",
+        }
 
     return node
 

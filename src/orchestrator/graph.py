@@ -23,9 +23,11 @@ def supervisor_node(state: OrchestratorState) -> dict:
     dry_run=True: останавливается после tester (тест выполняется, сдача нет).
     """
     prepared = bool(state.get("prepared", False))
+    has_desc = bool(state.get("task_description", "").strip())
     has_code = bool(state.get("generated_code", "").strip())
     has_tests = bool(state.get("test_results", "").strip())
     has_result = bool(state.get("submission_result", "").strip())
+    has_journal = bool(state.get("journal_status", "").strip())
     dry_run = state.get("dry_run", False)
 
     # task_fetcher всегда прогоняется первым (один раз): фетч задания при
@@ -33,6 +35,9 @@ def supervisor_node(state: OrchestratorState) -> dict:
     # иначе доки из ссылок задания никогда не подгрузятся (задание из файла).
     if not prepared:
         next_node = "task_fetcher"
+    elif not has_desc:
+        # task_fetcher отработал, но описания нет (журнал пустой) — нечего решать
+        next_node = "FINISH"
     elif not has_code:
         next_node = "coder"
     elif not has_tests:
@@ -41,13 +46,15 @@ def supervisor_node(state: OrchestratorState) -> dict:
         next_node = "FINISH"
     elif not has_result:
         next_node = "submitter"
+    elif not has_journal:
+        next_node = "journal_publisher"
     else:
         next_node = "FINISH"
 
     return {"next_agent": next_node}
 
 
-def route_supervisor(state: OrchestratorState) -> Literal["task_fetcher", "coder", "tester", "submitter", "__end__"]:
+def route_supervisor(state: OrchestratorState) -> Literal["task_fetcher", "coder", "tester", "submitter", "journal_publisher", "__end__"]:
     nxt = state.get("next_agent", "FINISH")
     if nxt == "FINISH":
         return END
@@ -60,6 +67,7 @@ def build_graph(platform_tools: list, gitea_tools: list):
     from orchestrator.agents.coder import make_coder_node
     from orchestrator.agents.tester import make_tester_node
     from orchestrator.agents.submitter import make_submitter_node
+    from orchestrator.agents.journal_publisher import make_journal_publisher_node
 
     graph = StateGraph(OrchestratorState)
 
@@ -68,6 +76,7 @@ def build_graph(platform_tools: list, gitea_tools: list):
     graph.add_node("coder", make_coder_node())
     graph.add_node("tester", make_tester_node())
     graph.add_node("submitter", make_submitter_node(gitea_tools))
+    graph.add_node("journal_publisher", make_journal_publisher_node(platform_tools))
 
     graph.add_edge(START, "supervisor")
     graph.add_conditional_edges("supervisor", route_supervisor)
@@ -75,5 +84,6 @@ def build_graph(platform_tools: list, gitea_tools: list):
     graph.add_edge("coder", "supervisor")
     graph.add_edge("tester", "supervisor")
     graph.add_edge("submitter", "supervisor")
+    graph.add_edge("journal_publisher", "supervisor")
 
     return graph.compile()

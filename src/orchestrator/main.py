@@ -84,7 +84,47 @@ def _explain_llm_error(exc: BaseException) -> Optional[str]:
     return None
 
 
-async def _run_async(task_id: str, task_text: str, dry_run: bool, review: bool = False) -> None:
+def _extract_score_feedback(test_results: str) -> str:
+    """
+    Достаёт из отчёта tester'а только содержательные секции для coder-retry:
+    ОЦЕНКА:, ПРОБЛЕМЫ:, ВЕРДИКТ:, ПРОЦЕНТ: и [STDERR].
+    Stdout и meta-строки (СИНТАКСИС/ПАТТЕРНЫ/DEPS) опускаем — это шум для нового coder'а.
+    """
+    if not test_results:
+        return ""
+    sections: list[str] = []
+    keep = False
+    buf: list[str] = []
+    for line in test_results.splitlines():
+        ls = line.strip()
+        # Старт смысловой секции
+        if ls.startswith(("ОЦЕНКА:", "ПРОБЛЕМЫ:", "ВЕРДИКТ:", "ПРОЦЕНТ:")):
+            if buf:
+                sections.append("\n".join(buf).strip())
+                buf = []
+            keep = True
+            buf.append(line)
+        elif ls.startswith("[STDERR]"):
+            if buf:
+                sections.append("\n".join(buf).strip())
+                buf = []
+            keep = True
+            buf.append(line)
+        elif ls.startswith("["):
+            # Любая другая [МЕТА] — закрываем текущую секцию
+            if buf:
+                sections.append("\n".join(buf).strip())
+                buf = []
+            keep = False
+        elif keep:
+            buf.append(line)
+    if buf:
+        sections.append("\n".join(buf).strip())
+    out = "\n\n".join(s for s in sections if s).strip()
+    return out[:4000]   # cap чтобы не раздувать coder-промпт
+
+
+async def _run_async(task_id: str, task_text: str, dry_run: bool, review: bool = False, auto: bool = False, include_new: bool = False) -> None:
     from langchain_mcp_adapters.client import MultiServerMCPClient
     from orchestrator.config import cfg
     from orchestrator.graph import build_graph
@@ -113,7 +153,7 @@ async def _run_async(task_id: str, task_text: str, dry_run: bool, review: bool =
         if log_path:
             console.print(f"[dim]Лог прогона: {log_path}[/]")
         try:
-            await _execute_graph(p_tools, g_tools, task_id, task_text, dry_run, review)
+            await _execute_graph(p_tools, g_tools, task_id, task_text, dry_run, review, auto, include_new)
         except BaseException as exc:  # noqa: BLE001 — нужно поймать всё для чистого вывода
             runlog.block("ERROR", _tb.format_exc())
             explained = _explain_llm_error(exc)
@@ -127,9 +167,50 @@ async def _run_async(task_id: str, task_text: str, dry_run: bool, review: bool =
             runlog.stop()
 
     if servers:
-        console.print(f"[dim]Подключаемся к MCP: {list(servers.keys())}...[/]")
-        client = MultiServerMCPClient(servers)
-        all_tools = await client.get_tools()
+        # MCP-туннель brojs регулярно отдаёт 504 — без него journal_publisher
+        # не работает, поэтому ждём подключения до 5 минут с retry каждые 5с.
+        MCP_TOTAL_TIMEOUT = 300   # 5 минут суммарно
+        MCP_RETRY_INTERVAL = 5    # каждые 5с
+        MCP_ATTEMPT_TIMEOUT = 25  # один get_tools — не более 25с
+
+        console.print(
+            f"[dim]Подключаемся к MCP: {list(servers.keys())}... "
+            f"(до {MCP_TOTAL_TIMEOUT}с, retry каждые {MCP_RETRY_INTERVAL}с)[/]"
+        )
+        all_tools: list = []
+        deadline = asyncio.get_event_loop().time() + MCP_TOTAL_TIMEOUT
+        attempt = 0
+        last_err: str = ""
+        while True:
+            attempt += 1
+            client = MultiServerMCPClient(servers)
+            try:
+                all_tools = await asyncio.wait_for(
+                    client.get_tools(), timeout=MCP_ATTEMPT_TIMEOUT
+                )
+                break  # успех
+            except asyncio.TimeoutError:
+                last_err = f"таймаут {MCP_ATTEMPT_TIMEOUT}с"
+            except Exception as e:  # noqa: BLE001
+                last_err = f"{type(e).__name__}: {str(e)[:120]}"
+
+            remaining = deadline - asyncio.get_event_loop().time()
+            if remaining <= 0:
+                console.print(
+                    f"[red]MCP недоступен после {attempt} попыток "
+                    f"({MCP_TOTAL_TIMEOUT}с): {last_err}.[/]"
+                )
+                console.print(
+                    "[red]Без MCP прогон бессмысленен (journal_publisher не сработает). "
+                    "Прерываемся.[/]"
+                )
+                return
+            console.print(
+                f"[yellow]Попытка {attempt} провалилась ({last_err}). "
+                f"Жду {MCP_RETRY_INTERVAL}с (осталось ~{int(remaining)}с)...[/]"
+            )
+            await asyncio.sleep(MCP_RETRY_INTERVAL)
+
         for t in all_tools:
             server_name = (getattr(t, "metadata", None) or {}).get("server", "") or ""
             if "gitea" in server_name.lower() or "gitea" in t.name.lower():
@@ -160,6 +241,8 @@ async def _execute_graph(
     task_text: str,
     dry_run: bool,
     review: bool = False,
+    auto: bool = False,
+    include_new: bool = False,
 ) -> None:
     from orchestrator.graph import build_graph
     from orchestrator.common import OrchestratorState
@@ -181,12 +264,13 @@ async def _execute_graph(
         "next_agent": "",
         "dry_run": dry_run,
         "retry_count": 0,
+        "include_new": include_new,
     }
 
     event_queue: asyncio.Queue = asyncio.Queue(maxsize=256)
     viz_mod.set_event_queue(event_queue)
 
-    MAX_RETRIES = 2
+    MAX_RETRIES = 10
 
     async with AgentVisualizer(task_id=task_id or "task", queue=event_queue) as viz:
         current_state = dict(base_initial)
@@ -207,7 +291,7 @@ async def _execute_graph(
                         viz.node_start(next_node)
                     else:
                         runlog.log("supervisor", "FINISH", "route")
-                        for n in ("task_fetcher", "coder", "tester", "submitter"):
+                        for n in ("task_fetcher", "coder", "tester", "submitter", "journal_publisher"):
                             viz.node_skip(n)
 
                 elif node_name == "coder":
@@ -236,7 +320,11 @@ async def _execute_graph(
                             console.print(f"  {line}")
 
                     console.print()
-                    if retry_count < MAX_RETRIES:
+                    if auto:
+                        # Авто-режим: dry-run → завершаем, иначе → сдаём
+                        choice = "s"
+                        console.print("  [dim]AUTO режим — продолжаем без подтверждения[/dim]")
+                    elif retry_count < MAX_RETRIES:
                         console.print(
                             f"  [bold](r)[/bold] Регенерировать код (retry {retry_count + 1}/{MAX_RETRIES})\n"
                             f"  [bold](s)[/bold] Сдать как есть\n"
@@ -244,14 +332,14 @@ async def _execute_graph(
                         )
                         try:
                             choice = input("  Выбор [r/s/q]: ").strip().lower()
-                        except KeyboardInterrupt:
+                        except (KeyboardInterrupt, EOFError):
                             choice = "q"
                     else:
                         console.print(f"  [dim]Исчерпаны все попытки ({MAX_RETRIES}). Сдаём как есть.[/dim]")
                         console.print("  [bold](s)[/bold] Сдать / [bold](q)[/bold] Выйти")
                         try:
                             choice = input("  Выбор [s/q]: ").strip().lower()
-                        except KeyboardInterrupt:
+                        except (KeyboardInterrupt, EOFError):
                             choice = "q"
 
                     runlog.log("user", f"выбор: {choice or '?'}", "input")
@@ -261,12 +349,17 @@ async def _execute_graph(
 
                     if choice == "r" and retry_count < MAX_RETRIES:
                         should_retry = True
+                        # Вытаскиваем секции ОЦЕНКА:/ПРОБЛЕМЫ:/ВЕРДИКТ:/ПРОЦЕНТ:
+                        # из отчёта тестера, чтобы coder увидел их в следующей итерации.
+                        feedback = _extract_score_feedback(test_results)
                         current_state = {
                             **current_state,
                             "generated_code": "",
                             "test_results": "",
                             "retry_count": retry_count + 1,
+                            "previous_score_feedback": feedback,
                         }
+                        runlog.log("retry", f"feedback {len(feedback)} симв", "input")
                         viz.resume_display()
                         viz.reset_for_retry()
                         viz.node_start("supervisor")
@@ -292,6 +385,14 @@ async def _execute_graph(
                     current_state = {**current_state, **node_data}
                     viz.node_start("supervisor")
 
+                elif node_name == "journal_publisher":
+                    js = node_data.get("journal_status", "")
+                    viz.set_journal_status(js)
+                    viz.node_done("journal_publisher")
+                    runlog.log("journal_publisher", js or "(пусто)", "result")
+                    current_state = {**current_state, **node_data}
+                    viz.node_start("supervisor")
+
                 else:
                     viz.node_done(node_name)
                     current_state = {**current_state, **node_data}
@@ -313,9 +414,15 @@ def run(
     task_text: Optional[str] = typer.Option(None, "--task-text", "-t", help="Текст задачи напрямую"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Генерировать код но не сдавать"),
     review: bool = typer.Option(False, "--review", "-r", help="Пауза после генерации для просмотра кода"),
+    auto: bool = typer.Option(False, "--auto", "-a", help="Без интерактива: авто-сдача после теста"),
+    include_new: bool = typer.Option(False, "--include-new", help="Включить новые todo (по умолчанию только rework — возвращённые на доработку)"),
 ) -> None:
-    """Запустить полный цикл: fetch -> code -> submit."""
-    asyncio.run(_run_async(task_id or "", task_text or "", dry_run, review))
+    """Запустить полный цикл: fetch -> code -> submit.
+
+    По умолчанию выбирает только задания, возвращённые преподавателем на доработку
+    (status=todo + reworkComment != ''). Для новых непройденных задач — --include-new.
+    """
+    asyncio.run(_run_async(task_id or "", task_text or "", dry_run, review, auto, include_new))
 
 
 @app.command()

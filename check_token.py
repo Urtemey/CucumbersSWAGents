@@ -1,20 +1,17 @@
-import httpx, os
-from dotenv import load_dotenv
-load_dotenv(override=True)
+"""Проверка LLM API (оркестратор + те же параметры попадут в solution через inject_llm_params)."""
+import httpx
+from orchestrator.config import cfg
 
-key = os.environ["OPENAI_API_KEY"]
-base = os.environ["LM_STUDIO_BASE_URL"]
-model = os.environ["LM_STUDIO_MODEL"]
-
-print(f"Key: {key[:20]}...")
-print(f"Base: {base}")
-print(f"Model: {model}")
+print(f"Key: {cfg.openai_api_key[:12]}...")
+print(f"Base: {cfg.lm_base_url}")
+print(f"Model: {cfg.lm_model}")
 
 r = httpx.post(
-    f"{base}/chat/completions",
-    headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-    json={"model": model, "messages": [{"role": "user", "content": "Say hi"}], "max_tokens": 20},
-    timeout=30,
+    f"{cfg.lm_base_url.rstrip('/')}/chat/completions",
+    headers={"Authorization": f"Bearer {cfg.openai_api_key}", "Content-Type": "application/json"},
+    json={"model": cfg.lm_model, "messages": [{"role": "user", "content": "Say hi"}], "max_tokens": 20},
+    timeout=60,
+    trust_env=False,
 )
 print(f"\nStatus: {r.status_code}")
 print(r.text[:500])

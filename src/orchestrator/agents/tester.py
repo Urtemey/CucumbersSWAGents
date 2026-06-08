@@ -469,12 +469,10 @@ def _format_report(syntax: tuple, static: dict, run: dict, score: str) -> str:
     if run["stdout"]:
         lines.append(f"[STDOUT]\n{run['stdout']}")
     if run["stderr"]:
-        err_lines = [
-            l for l in run["stderr"].splitlines()
-            if l.strip() and ("Error" in l or "Traceback" in l or "Warning" in l or "Exception" in l)
-        ]
-        if err_lines:
-            lines.append(f"[STDERR]\n" + "\n".join(err_lines[:20]))
+        # Берём хвост stderr целиком — для Traceback важны все строки подряд,
+        # фильтр "только строки с Error" терял File/line-номера трейсбэка.
+        tail = run["stderr"][-1500:]
+        lines.append(f"[STDERR]\n{tail}")
 
     # LLM-оценка
     lines.append("\n" + score)
